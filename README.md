@@ -21,3 +21,9 @@ python3 scripts/build_skill_zip.py
 ```
 
 Produces `norikae-guide-skill.zip` containing the skill files ready for distribution.
+
+## Network whitelist
+
+If your sandbox restricts outbound network access, add the following domain:
+
+- `transit.yahoo.co.jp`

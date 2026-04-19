@@ -22,7 +22,7 @@ Options:
 - `--ticket`: `ic` (default), `cash`
 - `--seat-preference`: `non_reserved` (default), `reserved`, `green`
 - `--walk-speed`: `slightly_slow` (default), `fast`, `slightly_fast`, `slow`
-- `--no-use-shinkansen`, `--no-use-express`, `--no-use-airline`, `--no-use-highway-bus`, `--no-use-local-bus`, `--no-use-ferry`
+- `--no-use-shinkansen`, `--no-use-express`, `--no-use-airline`, `--no-use-highway-bus`, `--no-use-local-bus`, `--no-use-ferry` — by default all transportation types are enabled; pass these flags when the user asks for a specific type
 
 You can also fetch from an existing URL:
 ```bash

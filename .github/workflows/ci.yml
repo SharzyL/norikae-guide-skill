@@ -26,7 +26,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv run python scripts/build_skill_zip.py
+      - run: unzip norikae-guide-skill.zip -d norikae-guide-skill
       - uses: actions/upload-artifact@v4
         with:
           name: norikae-guide-skill
-          path: norikae-guide-skill.zip
+          path: norikae-guide-skill/
