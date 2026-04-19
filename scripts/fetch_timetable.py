@@ -350,9 +350,7 @@ def cmd_train(args: _TrainArgs) -> int:
     station_name = page["directionDetail"]["stationName"]
     rail_name = page["directionDetail"]["directionItem"]["routeInfos"][0]["railName"]
 
-    print(
-        f"=== {station_name}駅 {rail_name} {tt['displayName']} (ID: {tt['trainId']}) ==="
-    )
+    print(f"=== {station_name}駅 {rail_name} {tt['displayName']} ===")
     print()
 
     for stop in tt["stopStation"]:

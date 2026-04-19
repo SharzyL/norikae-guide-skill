@@ -144,7 +144,15 @@ def _extract_summary(block: str) -> str:
     )
     parts: list[str] = []
     for _cls, content in items:
-        parts.append(re.sub(r"\s+", " ", _strip_tags(content)))
+        text = re.sub(r"\s+", " ", _strip_tags(content))
+        # "04:55発→05:36着41分（乗車41分）" → "04:55 → 05:36 41分 (乗車41分)"
+        text = re.sub(
+            r"(\d{2}:\d{2})発→(\d{2}:\d{2})着",
+            r"\1 → \2 ",
+            text,
+        )
+        text = text.replace("（", "(").replace("）", ")")
+        parts.append(text)
     return " | ".join(parts)
 
 
@@ -180,18 +188,11 @@ def _parse_route_detail(block: str) -> list[str]:
             if name_m:
                 name = _strip_tags(name_m.group(1))
 
-            if re.search(r"icnStaDep", chunk):
-                prefix = "[発]"
-            elif re.search(r"icnStaArr", chunk):
-                prefix = "[着]"
-            else:
-                prefix = "   "
-
-            lines.append(f"  {prefix} {time_str}  {name}")
+            lines.append(f"  ◉ {time_str}  {name}")
 
         elif kind.startswith("access"):
             if re.search(r"icnWalk", chunk):
-                lines.append("    | 徒歩")
+                lines.append("  │  徒歩")
             else:
                 transport_m = re.search(
                     r'<li class="transport"[^>]*>(.*?)</li>', chunk, re.S
@@ -217,12 +218,37 @@ def _parse_route_detail(block: str) -> list[str]:
                     inner = re.sub(r'<span class="line[^"]*"[^>]*></span>', "", inner)
                     transport = re.sub(r"\s+", " ", _strip_tags(inner)).strip()
                     dest_str = f" ({', '.join(dest_parts)})" if dest_parts else ""
-                    lines.append(f"    | {transport}{dest_str}")
 
-                # Fare follows the access div as <p class="fare">
-                fare_m = re.search(r'<p class="fare"[^>]*>(.*?)</p>', chunk, re.S)
-                if fare_m:
-                    lines.append(f"    | 運賃: {_strip_tags(fare_m.group(1))}")
+                    # Platform info
+                    platform_m = re.search(
+                        r'<li class="platform">(.*?)</li>', chunk, re.S
+                    )
+                    platform_suffix = ""
+                    if platform_m:
+                        raw = re.sub(r"<!--.*?-->", "", platform_m.group(1))
+                        raw = _strip_tags(raw).strip()
+                        # e.g. "[発] 9番線 → [着] 情報なし"
+                        parts_p = [
+                            p.strip()
+                            for p in re.split(r"→", raw)
+                            if "情報なし" not in p and p.strip()
+                        ]
+                        if parts_p:
+                            platform_suffix = f" ({' → '.join(parts_p)})"
+
+                    # Fare follows the access div as <p class="fare">
+                    fare_m = re.search(r'<p class="fare"[^>]*>(.*?)</p>', chunk, re.S)
+                    fare_suffix = ""
+                    if fare_m:
+                        fare_text = _strip_tags(fare_m.group(1))
+                        if re.search(r"指定席|グリーン|自由席", fare_text):
+                            fare_suffix = f" [{fare_text}]"
+                        else:
+                            fare_suffix = f" [ここまでの基本運賃: {fare_text}]"
+
+                    lines.append(
+                        f"  │  {transport}{dest_str}{platform_suffix}{fare_suffix}"
+                    )
 
     return lines
 
