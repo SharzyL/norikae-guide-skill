@@ -64,9 +64,17 @@ Follow these steps in order:
 
 3. **Show the departure timetable:**
    ```bash
-   python3 scripts/fetch_timetable.py timetable <station-code> <gid> [--kind 1|2|4]
+   python3 scripts/fetch_timetable.py timetable <station-code> <gid> [--kind 1|2|4] [--hours 5-8]
    ```
    `--kind`: `1` = weekday, `2` = saturday, `4` = holiday. Defaults to today's schedule.
+   `--hours`: filter output to a range of hours (e.g. `5-8`) or a single hour (e.g. `22`).
+   Each departure shows its train ID in brackets (e.g. `45[5602]`). Use this ID for step 4.
+
+4. **Show a specific train's stop-by-stop schedule (optional):**
+   ```bash
+   python3 scripts/fetch_timetable.py train <station-code> <gid> <train-id>
+   ```
+   Use the train ID from step 3 to show all stops with arrival/departure times.
 
 ## Clarification Rules
 

@@ -43,6 +43,15 @@ class _TimetableArgs(Protocol):
     station_code: str
     gid: str
     kind: str | None
+    hours: str | None
+
+    timeout: int
+
+
+class _TrainArgs(Protocol):
+    station_code: str
+    gid: str
+    train_id: str
 
     timeout: int
 
@@ -97,6 +106,7 @@ class _Master(TypedDict):
 
 class _MinTimeTable(TypedDict):
     minute: str
+    trainId: str
     trainName: str
     kindId: str
     destinationId: str
@@ -119,6 +129,28 @@ class _TimetableItem(TypedDict):
 
 class _TimetablePageProps(TypedDict):
     timetableItem: _TimetableItem
+
+
+class _StopStation(TypedDict):
+    stationCode: str
+    stationName: str
+    arrivalTime: str | None
+    departureTime: str | None
+
+
+class _TrainTimetable(TypedDict):
+    trainId: str
+    displayName: str
+    stopStation: list[_StopStation]
+
+
+class _TrainTimetableResult(TypedDict):
+    timetable: _TrainTimetable
+
+
+class _TrainPageProps(TypedDict):
+    timetableStationTrainResult: _TrainTimetableResult
+    directionDetail: _DirectionDetail
 
 
 # ── HTTP helpers ────────────────────────────────────────
@@ -251,8 +283,16 @@ def cmd_timetable(args: _TimetableArgs) -> int:
     if len(dest_map) > 1 or len(kind_map) > 1:
         print()
 
+    hour_min, hour_max = 0, 99
+    if args.hours:
+        parts_range = args.hours.split("-")
+        hour_min = int(parts_range[0])
+        hour_max = int(parts_range[1]) if len(parts_range) > 1 else hour_min
+
     for hour_entry in tt["hourTimeTable"]:
         hour = hour_entry["hour"]
+        if not (hour_min <= int(hour) <= hour_max):
+            continue
         trains = hour_entry["minTimeTable"]
         if not trains:
             continue
@@ -260,7 +300,8 @@ def cmd_timetable(args: _TimetableArgs) -> int:
         entries: list[str] = []
         for t in trains:
             minute = t["minute"]
-            parts: list[str] = [minute]
+            train_id = t["trainId"]
+            parts: list[str] = [f"{minute}[{train_id}]"]
 
             kind_id = t["kindId"]
             dest_id = t["destinationId"]
@@ -284,6 +325,40 @@ def cmd_timetable(args: _TimetableArgs) -> int:
             entries.append("".join(parts))
 
         print(f"  {hour:>2}時 | {' '.join(entries)}")
+
+    return 0
+
+
+def _fmt_time(raw: str | None) -> str:
+    if not raw:
+        return "--:--"
+    raw = raw.zfill(4)
+    return f"{raw[:2]}:{raw[2:]}"
+
+
+# ── train ──────────────────────────────────────────────
+
+
+def cmd_train(args: _TrainArgs) -> int:
+    url = f"{TIMETABLE_URL}/{args.station_code}/{args.gid}/{args.train_id}"
+    print(f"URL: {url}\n")
+    html = _fetch(url, args.timeout)
+    data = _extract_next_data(html)
+
+    page = cast(_TrainPageProps, data["props"]["pageProps"])
+    tt = page["timetableStationTrainResult"]["timetable"]
+    station_name = page["directionDetail"]["stationName"]
+    rail_name = page["directionDetail"]["directionItem"]["routeInfos"][0]["railName"]
+
+    print(
+        f"=== {station_name}駅 {rail_name} {tt['displayName']} (ID: {tt['trainId']}) ==="
+    )
+    print()
+
+    for stop in tt["stopStation"]:
+        arr = _fmt_time(stop["arrivalTime"])
+        dep = _fmt_time(stop["departureTime"])
+        print(f"  {arr} → {dep}  {stop['stationName']}")
 
     return 0
 
@@ -320,6 +395,18 @@ def parse_args() -> argparse.Namespace:
         choices=["1", "2", "4"],
         help="Day kind: 1=weekday, 2=saturday, 4=holiday",
     )
+    _ = p_tt.add_argument(
+        "--hours",
+        help="Filter by hour range, e.g. '5-8' or '22'",
+    )
+
+    # train
+    p_train = sub.add_parser(
+        "train", help="Show stop-by-stop schedule for a specific train"
+    )
+    _ = p_train.add_argument("station_code", help="Station code")
+    _ = p_train.add_argument("gid", help="Line/direction group ID")
+    _ = p_train.add_argument("train_id", help="Train ID from timetable output")
 
     return parser.parse_args()
 
@@ -335,6 +422,8 @@ def main() -> int:
             return cmd_lines(cast(_LinesArgs, args_obj))
         elif command == "timetable":
             return cmd_timetable(cast(_TimetableArgs, args_obj))
+        elif command == "train":
+            return cmd_train(cast(_TrainArgs, args_obj))
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
