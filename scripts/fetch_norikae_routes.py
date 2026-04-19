@@ -72,7 +72,6 @@ class _BuildUrlArgs(Protocol):
 class _MainArgs(_BuildUrlArgs, Protocol):
     url: str | None
     timeout: int
-    show_url: bool
 
 
 def build_url(args: _BuildUrlArgs) -> str:
@@ -334,7 +333,6 @@ def parse_args() -> _MainArgs:
     )
 
     _ = parser.add_argument("--timeout", type=int, default=20)
-    _ = parser.add_argument("--show-url", action="store_true")
 
     result = cast(_MainArgs, cast(object, parser.parse_args()))
 
@@ -355,10 +353,8 @@ def main() -> int:
         print(f"Error fetching route data: {exc}", file=sys.stderr)
         return 1
 
-    if args.show_url:
-        print(f"URL: {url}")
-        print()
-
+    print(f"URL: {url}")
+    print()
     print(content)
     return 0
 

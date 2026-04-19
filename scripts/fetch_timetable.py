@@ -29,11 +29,13 @@ KIND_LABELS = {"1": "平日", "2": "土曜", "4": "日曜・祝日"}
 class _SearchArgs(Protocol):
     query: str
     station_only: bool
+
     timeout: int
 
 
 class _LinesArgs(Protocol):
     station_code: str
+
     timeout: int
 
 
@@ -41,6 +43,7 @@ class _TimetableArgs(Protocol):
     station_code: str
     gid: str
     kind: str | None
+
     timeout: int
 
 
@@ -157,6 +160,7 @@ def _extract_next_data(html: str) -> _NextData:
 
 def cmd_search(args: _SearchArgs) -> int:
     url = f"{SUGGEST_URL}?value={quote(args.query)}"
+    print(f"URL: {url}\n")
     data = cast(_SuggestResponse, _fetch_json(url, args.timeout))
 
     results = data["Result"]
@@ -187,6 +191,7 @@ def cmd_search(args: _SearchArgs) -> int:
 
 def cmd_lines(args: _LinesArgs) -> int:
     url = f"{TIMETABLE_URL}/{args.station_code}"
+    print(f"URL: {url}\n")
     html = _fetch(url, args.timeout)
     data = _extract_next_data(html)
 
@@ -210,6 +215,7 @@ def cmd_timetable(args: _TimetableArgs) -> int:
     url = f"{TIMETABLE_URL}/{args.station_code}/{args.gid}"
     if args.kind:
         url += f"?kind={args.kind}"
+    print(f"URL: {url}\n")
     html = _fetch(url, args.timeout)
     data = _extract_next_data(html)
 

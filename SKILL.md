@@ -11,10 +11,8 @@ Supports English, Chinese, and Japanese input — always convert station names t
 ## Route Search
 
 ```bash
-python3 scripts/fetch_norikae_routes.py --from <出発駅> --to <到着駅> --show-url [options]
+python3 scripts/fetch_norikae_routes.py --from <出発駅> --to <到着駅> [options]
 ```
-
-`--show-url` must always be included.
 
 Options:
 - `--via <駅>` (repeatable, max 3)
@@ -28,7 +26,7 @@ Options:
 
 You can also fetch from an existing URL:
 ```bash
-python3 scripts/fetch_norikae_routes.py --url '<full-yahoo-url>' --show-url
+python3 scripts/fetch_norikae_routes.py --url '<full-yahoo-url>'
 ```
 
 ### Intent Mapping

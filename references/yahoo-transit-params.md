@@ -114,13 +114,13 @@ When user-provided names can match multiple stations, ask one clarification ques
 python3 scripts/fetch_norikae_routes.py \
   --from 東京 --to 新宿 --via 表参道 \
   --year 2026 --month 3 --day 6 --hour 10 --minute 30 \
-  --time-type departure --sort-by time --show-url
+  --time-type departure --sort-by time
 ```
 
 Fetch from existing URL:
 
 ```bash
-python3 scripts/fetch_norikae_routes.py --url 'https://transit.yahoo.co.jp/search/result?...' --show-url
+python3 scripts/fetch_norikae_routes.py --url 'https://transit.yahoo.co.jp/search/result?...'
 ```
 
 ## Timetable API
