@@ -110,17 +110,6 @@ When user-provided names can match multiple stations, ask one clarification ques
 
 ## Command Examples
 
-Build URL only:
-
-```bash
-python3 scripts/build_norikae_url.py \
-  --from 東京 --to 新宿 --via 表参道 \
-  --year 2026 --month 3 --day 6 --hour 10 --minute 30 \
-  --time-type departure --sort-by time
-```
-
-Fetch and extract plain text:
-
 ```bash
 python3 scripts/fetch_norikae_routes.py \
   --from 東京 --to 新宿 --via 表参道 \
