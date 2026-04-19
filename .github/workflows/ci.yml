@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv tool install ruff && uv tool install basedpyright
+      - run: ruff check scripts/
+      - run: ruff format --check scripts/
+      - run: basedpyright scripts/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run python scripts/build_skill_zip.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: norikae-guide-skill
+          path: norikae-guide-skill.zip

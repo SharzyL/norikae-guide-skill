@@ -10,7 +10,11 @@ See [SKILL.md](SKILL.md) for full usage reference.
 npx -y skills@latest add Enter-tainer/norikae-guide-skill --skill norikae-guide --yes --global
 ```
 
-## Build distributable zip
+## Download
+
+Pre-built zip files are available as CI artifacts. Go to the [Actions](../../actions) tab, open the latest successful run on `main`, and download `norikae-guide-skill` from the Artifacts section.
+
+## Build distributable zip locally
 
 ```bash
 python3 scripts/build_skill_zip.py
