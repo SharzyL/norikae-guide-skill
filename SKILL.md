@@ -1,13 +1,13 @@
 ---
 name: norikae-guide
-description: Plan Japan train routes with Yahoo! 乗換案内 and fetch real route content from transit.yahoo.co.jp without MCP servers. Use when users ask for station-to-station routing in Japan, provide natural-language constraints (arrival/departure time, first/last train, cheapest/fastest/fewest transfers, transport exclusions, via stations), or provide English/Chinese station names that must be normalized to Japanese station names before querying.
+description: Plan Japan train routes and look up station timetables with Yahoo! 乗換案内, fetching real data from transit.yahoo.co.jp without MCP servers. Use when users ask for station-to-station routing in Japan, provide natural-language constraints (arrival/departure time, first/last train, cheapest/fastest/fewest transfers, transport exclusions, via stations), look up station timetables or departure schedules, or provide English/Chinese station names that must be normalized to Japanese station names before querying.
 ---
 
 # Norikae Guide
 
 ## Goal
 
-Turn a travel request into Yahoo! 乗換案内 query parameters, fetch the result page, and return useful route content.
+Turn a travel request into Yahoo! 乗換案内 query parameters, fetch the result page, and return useful route content. Also support station timetable lookups: searching for stations, listing available lines/directions, and displaying departure schedules.
 
 ## Workflow
 
@@ -78,11 +78,36 @@ Return these sections in order:
 - Extracted route text (or summarized top routes)
 - If live fetch fails, state failure reason and still provide URL
 
+## Timetable Lookup Workflow
+
+Use `scripts/fetch_timetable.py` for timetable queries. It has three subcommands:
+
+1. **Search for a station** — find the station code by name.
+   ```
+   python3 scripts/fetch_timetable.py search <station-name> [--station-only]
+   ```
+   Returns station codes needed for subsequent commands.
+
+2. **List lines/directions** — show available rail lines and directions at a station.
+   ```
+   python3 scripts/fetch_timetable.py lines <station-code>
+   ```
+   Returns line group IDs (gid) needed for the timetable command.
+
+3. **Show timetable** — display the departure schedule for a specific station, line, and direction.
+   ```
+   python3 scripts/fetch_timetable.py timetable <station-code> <gid> [--kind 1|2|4]
+   ```
+   `--kind`: 1=weekday (平日), 2=saturday (土曜), 4=holiday (日曜・祝日). Defaults to today's schedule.
+
+Typical flow: search → lines → timetable. If the user provides a station name, run `search` first to resolve the code, then `lines` to find the right gid, then `timetable` to show departures.
+
 ## Resources
 
 - Parameter and query mapping: [references/yahoo-transit-params.md](references/yahoo-transit-params.md)
 - Natural language examples: [references/natural-language-examples.md](references/natural-language-examples.md)
-- URL builder: `scripts/build_norikae_url.py`
-- Fetch and extractor: `scripts/fetch_norikae_routes.py`
+- Route URL builder: `scripts/build_norikae_url.py`
+- Route fetch and extractor: `scripts/fetch_norikae_routes.py`
+- Timetable lookup: `scripts/fetch_timetable.py`
 
-Use `fetch_norikae_routes.py` by default when users ask for actual route content.
+Use `fetch_norikae_routes.py` for route search queries and `fetch_timetable.py` for timetable lookups.

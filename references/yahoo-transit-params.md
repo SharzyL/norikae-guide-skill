@@ -134,14 +134,59 @@ Fetch from existing URL:
 python3 scripts/fetch_norikae_routes.py --url 'https://transit.yahoo.co.jp/search/result?...' --show-url
 ```
 
-Return HTML snippet:
+## Timetable API
 
-```bash
-python3 scripts/fetch_norikae_routes.py --url '<url>' --format html
+### Station Search
+
+```
+GET https://transit.yahoo.co.jp/api/suggest?value=<station-name-query>
 ```
 
-## Extraction Strategy
+Returns JSON with `Result[]` entries. Each entry has:
+- `Suggest`: display name
+- `Code`: station/bus stop code
+- `Id`: `"st"` for train station, `"bu"` for bus stop
+- `Address`: prefecture/area
 
-- Remove noisy tags (`script`, `style`, comments, nav/header/footer/aside).
-- Prefer range from `class="...routeDetail..."` to `条件を変更して検索`.
-- Fall back to text extraction when structural markers are missing.
+### Station Lines (categories)
+
+```
+GET https://transit.yahoo.co.jp/timetable/<station-code>
+```
+
+The `__NEXT_DATA__` JSON contains `directionDetail.directionItem.routeInfos[]`, each with:
+- `railName`: line name (e.g. `"ＪＲ山手線外回り"`)
+- `railGroup[]`: `direction` (destination area), `groupId` (gid for timetable URL)
+
+### Timetable
+
+```
+GET https://transit.yahoo.co.jp/timetable/<station-code>/<gid>[?kind=1|2|4]
+```
+
+`kind`: `1`=weekday, `2`=saturday, `4`=holiday. Defaults to today's applicable schedule.
+
+The `__NEXT_DATA__` JSON contains `timetableItem` with:
+- `hourTimeTable[]`: `hour`, `minTimeTable[]` (`minute`, `trainName`, `kindId`, `destinationId`, `extraTrain`)
+- `master.destination[]`: `id`, `name`, `info` (short label)
+- `master.kind[]`: `id`, `name`, `info` (short label)
+
+## Timetable Command Examples
+
+Search for a station:
+
+```bash
+python3 scripts/fetch_timetable.py search 渋谷 --station-only
+```
+
+List lines at a station:
+
+```bash
+python3 scripts/fetch_timetable.py lines 22715
+```
+
+Show weekday timetable:
+
+```bash
+python3 scripts/fetch_timetable.py timetable 22715 7171 --kind 1
+```

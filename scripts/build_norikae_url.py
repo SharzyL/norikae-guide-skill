@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+from typing import Protocol, cast
 from urllib.parse import urlencode
 
 BASE_URL = "https://transit.yahoo.co.jp/search/result"
@@ -42,7 +43,29 @@ SORT_MAP = {
 }
 
 
-def build_url(args: argparse.Namespace) -> str:
+class BuildUrlArgs(Protocol):
+    departure: str
+    arrival: str
+    via: list[str] | None
+    year: int | None
+    month: int | None
+    day: int | None
+    hour: int | None
+    minute: int | None
+    time_type: str
+    ticket: str
+    seat_preference: str
+    walk_speed: str
+    sort_by: str
+    use_airline: bool
+    use_shinkansen: bool
+    use_express: bool
+    use_highway_bus: bool
+    use_local_bus: bool
+    use_ferry: bool
+
+
+def build_url(args: BuildUrlArgs) -> str:
     now = datetime.now()
     year = args.year if args.year is not None else now.year
     month = args.month if args.month is not None else now.month
@@ -80,54 +103,72 @@ def build_url(args: argparse.Namespace) -> str:
     return f"{BASE_URL}?{urlencode(params)}"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args() -> BuildUrlArgs:
     parser = argparse.ArgumentParser(
         description="Build a Yahoo! 乗換案内 search URL from route options."
     )
-    parser.add_argument("--from", dest="departure", required=True, help="Departure station in Japanese")
-    parser.add_argument("--to", dest="arrival", required=True, help="Arrival station in Japanese")
-    parser.add_argument("--via", action="append", help="Via station (repeatable, max 3)")
+    _ = parser.add_argument(
+        "--from", dest="departure", required=True, help="Departure station in Japanese"
+    )
+    _ = parser.add_argument(
+        "--to", dest="arrival", required=True, help="Arrival station in Japanese"
+    )
+    _ = parser.add_argument(
+        "--via", action="append", help="Via station (repeatable, max 3)"
+    )
 
-    parser.add_argument("--year", type=int)
-    parser.add_argument("--month", type=int)
-    parser.add_argument("--day", type=int)
-    parser.add_argument("--hour", type=int)
-    parser.add_argument("--minute", type=int)
+    _ = parser.add_argument("--year", type=int)
+    _ = parser.add_argument("--month", type=int)
+    _ = parser.add_argument("--day", type=int)
+    _ = parser.add_argument("--hour", type=int)
+    _ = parser.add_argument("--minute", type=int)
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--time-type",
         default="departure",
         choices=sorted(TIME_TYPE_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--ticket",
         default="ic",
         choices=sorted(TICKET_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--seat-preference",
         default="non_reserved",
         choices=sorted(SEAT_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--walk-speed",
         default="slightly_slow",
         choices=sorted(WALK_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--sort-by",
         default="time",
         choices=sorted(SORT_MAP.keys()),
     )
 
-    parser.add_argument("--use-airline", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-shinkansen", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-express", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-highway-bus", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-local-bus", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-ferry", action=argparse.BooleanOptionalAction, default=True)
+    _ = parser.add_argument(
+        "--use-airline", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-shinkansen", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-express", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-highway-bus", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-local-bus", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-ferry", action=argparse.BooleanOptionalAction, default=True
+    )
 
-    return parser.parse_args()
+    return cast(BuildUrlArgs, cast(object, parser.parse_args()))
 
 
 def main() -> None:

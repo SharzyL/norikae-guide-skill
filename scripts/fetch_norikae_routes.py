@@ -8,6 +8,7 @@ from datetime import datetime
 import html as html_lib
 import re
 import sys
+from typing import Protocol, cast
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -46,7 +47,35 @@ SORT_MAP = {
 }
 
 
-def build_url(args: argparse.Namespace) -> str:
+class _BuildUrlArgs(Protocol):
+    departure: str
+    arrival: str
+    via: list[str] | None
+    year: int | None
+    month: int | None
+    day: int | None
+    hour: int | None
+    minute: int | None
+    time_type: str
+    ticket: str
+    seat_preference: str
+    walk_speed: str
+    sort_by: str
+    use_airline: bool
+    use_shinkansen: bool
+    use_express: bool
+    use_highway_bus: bool
+    use_local_bus: bool
+    use_ferry: bool
+
+
+class _MainArgs(_BuildUrlArgs, Protocol):
+    url: str | None
+    timeout: int
+    show_url: bool
+
+
+def build_url(args: _BuildUrlArgs) -> str:
     now = datetime.now()
     year = args.year if args.year is not None else now.year
     month = args.month if args.month is not None else now.month
@@ -94,112 +123,225 @@ def fetch_html(url: str, timeout: int) -> str:
             )
         },
     )
-    with urlopen(request, timeout=timeout) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="ignore")
+    with urlopen(request, timeout=timeout) as resp:  # pyright: ignore[reportAny]
+        charset = cast(str, resp.headers.get_content_charset()) or "utf-8"  # pyright: ignore[reportAny]
+        raw = cast(bytes, resp.read())  # pyright: ignore[reportAny]
+        return raw.decode(charset, errors="ignore")
 
 
-def strip_noise(html: str) -> str:
-    cleaned = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<!--[\s\S]*?-->", "", cleaned)
-    cleaned = re.sub(r"<nav[^>]*>[\s\S]*?</nav>", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<header[^>]*>[\s\S]*?</header>", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<footer[^>]*>[\s\S]*?</footer>", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<aside[^>]*>[\s\S]*?</aside>", "", cleaned, flags=re.IGNORECASE)
-    return cleaned
+def _strip_tags(fragment: str) -> str:
+    text = re.sub(r"<[^>]+>", "", fragment)
+    return html_lib.unescape(text).strip()
 
 
-def html_to_text(fragment: str) -> str:
-    text = re.sub(r"<[^>]+>", "\n", fragment)
-    text = html_lib.unescape(text)
-    text = re.sub(r"\n\s*\n+", "\n", text)
-    return text.strip()
-
-
-def extract_content(html: str, output_format: str) -> str:
-    cleaned = strip_noise(html)
-
-    route_start_match = re.search(
-        r'(<div[^>]*class="[^"]*routeDetail[^"]*"[^>]*>)',
-        cleaned,
-        flags=re.IGNORECASE,
+def _extract_summary(block: str) -> str:
+    m = re.search(r'<ul class="summary">(.*?)</ul>', block, re.S)
+    if not m:
+        return ""
+    ul = m.group(1)
+    items = cast(
+        list[tuple[str, str]],
+        re.findall(r'<li class="(\w+)"[^>]*>(.*?)</li>', ul, re.S),
     )
-    route_end = cleaned.find("条件を変更して検索")
-
-    if route_start_match and route_end != -1 and route_end > route_start_match.start():
-        section = cleaned[route_start_match.start():route_end]
-        return section.strip() if output_format == "html" else html_to_text(section)
-
-    text = html_to_text(cleaned)
-    text_start = text.find("ルート1")
-    text_end = text.find("条件を変更して検索")
-
-    if text_start != -1 and text_end != -1 and text_end > text_start:
-        text = text[text_start:text_end]
-
-    return text
+    parts: list[str] = []
+    for _cls, content in items:
+        parts.append(re.sub(r"\s+", " ", _strip_tags(content)))
+    return " | ".join(parts)
 
 
-def parse_args() -> argparse.Namespace:
+def _parse_route_detail(block: str) -> list[str]:
+    lines: list[str] = []
+
+    # Find station and access elements in document order
+    elements = list(
+        re.finditer(
+            r'<div class="(station|access[^"]*)"[^>]*>',
+            block,
+        )
+    )
+
+    for i, elem in enumerate(elements):
+        kind = elem.group(1)
+        start = elem.start()
+        end = elements[i + 1].start() if i + 1 < len(elements) else len(block)
+        chunk = block[start:end]
+
+        if kind == "station":
+            time_m = re.search(r'<ul class="time">(.*?)</ul>', chunk, re.S)
+            time_parts: list[str] = []
+            if time_m:
+                time_parts = [
+                    _strip_tags(cast(str, t))
+                    for t in re.findall(r"<li>(.*?)</li>", time_m.group(1))  # pyright: ignore[reportAny]
+                ]
+            time_str = " / ".join(time_parts)
+
+            name = ""
+            name_m = re.search(r"<dt>(?:<a[^>]*>)?(.*?)(?:</a>)?</dt>", chunk, re.S)
+            if name_m:
+                name = _strip_tags(name_m.group(1))
+
+            if re.search(r"icnStaDep", chunk):
+                prefix = "[発]"
+            elif re.search(r"icnStaArr", chunk):
+                prefix = "[着]"
+            else:
+                prefix = "   "
+
+            lines.append(f"  {prefix} {time_str}  {name}")
+
+        elif kind.startswith("access"):
+            if re.search(r"icnWalk", chunk):
+                lines.append("    | 徒歩")
+            else:
+                transport_m = re.search(
+                    r'<li class="transport"[^>]*>(.*?)</li>', chunk, re.S
+                )
+                if transport_m:
+                    inner = transport_m.group(1)
+                    # Extract destination separately (handle nested spans)
+                    dest_parts: list[str] = []
+                    dest_m = re.search(
+                        r'<span class="destination">(.*)</span></div>', inner, re.S
+                    )
+                    if dest_m:
+                        dest_html = dest_m.group(1)
+                        # Remove "当駅始発" marker
+                        dest_html = re.sub(
+                            r'<span class="icnFirstTrain">[^<]*</span>', "", dest_html
+                        )
+                        dest_text = _strip_tags(dest_html)
+                        if dest_text:
+                            dest_parts.append(dest_text)
+                        inner = inner[: dest_m.start()] + inner[dest_m.end() :]
+                    # Remove line color span and icon spans
+                    inner = re.sub(r'<span class="line[^"]*"[^>]*></span>', "", inner)
+                    transport = re.sub(r"\s+", " ", _strip_tags(inner)).strip()
+                    dest_str = f" ({', '.join(dest_parts)})" if dest_parts else ""
+                    lines.append(f"    | {transport}{dest_str}")
+
+                # Fare follows the access div as <p class="fare">
+                fare_m = re.search(r'<p class="fare"[^>]*>(.*?)</p>', chunk, re.S)
+                if fare_m:
+                    lines.append(f"    | 運賃: {_strip_tags(fare_m.group(1))}")
+
+    return lines
+
+
+def extract_content(html: str) -> str:
+    cleaned = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+
+    route_blocks = cast(
+        list[tuple[str, str]],
+        re.findall(
+            r'id="route(\d+)"[^>]*>(.*?)(?=<div[^>]*id="route\d+"|<div[^>]*id="mdRouteSearch")',
+            cleaned,
+            re.S,
+        ),
+    )
+
+    if not route_blocks:
+        text = re.sub(r"<[^>]+>", "\n", cleaned)
+        text = html_lib.unescape(text)
+        text = re.sub(r"\n\s*\n+", "\n", text).strip()
+        start = text.find("ルート1")
+        end = text.find("条件を変更して検索")
+        if start != -1 and end != -1:
+            return text[start:end].strip()
+        return text
+
+    routes: list[str] = []
+    for idx_str, block in route_blocks:
+        idx = int(idx_str)
+        lines: list[str] = [f"=== ルート{idx} ==="]
+        summary = _extract_summary(block)
+        if summary:
+            lines.append(summary)
+        lines.append("")
+
+        detail_m = re.search(r'<div class="routeDetail">(.*)', block, re.S)
+        if detail_m:
+            lines.extend(_parse_route_detail(detail_m.group(1)))
+
+        routes.append("\n".join(lines))
+
+    return "\n\n".join(routes)
+
+
+def parse_args() -> _MainArgs:
     parser = argparse.ArgumentParser(
         description="Fetch and extract route details from Yahoo! 乗換案内."
     )
 
-    parser.add_argument("--url", help="Fully prepared Yahoo transit URL")
-    parser.add_argument("--from", dest="departure", help="Departure station in Japanese")
-    parser.add_argument("--to", dest="arrival", help="Arrival station in Japanese")
-    parser.add_argument("--via", action="append", help="Via station (repeatable, max 3)")
+    _ = parser.add_argument("--url", help="Fully prepared Yahoo transit URL")
+    _ = parser.add_argument(
+        "--from", dest="departure", help="Departure station in Japanese"
+    )
+    _ = parser.add_argument("--to", dest="arrival", help="Arrival station in Japanese")
+    _ = parser.add_argument(
+        "--via", action="append", help="Via station (repeatable, max 3)"
+    )
 
-    parser.add_argument("--year", type=int)
-    parser.add_argument("--month", type=int)
-    parser.add_argument("--day", type=int)
-    parser.add_argument("--hour", type=int)
-    parser.add_argument("--minute", type=int)
+    _ = parser.add_argument("--year", type=int)
+    _ = parser.add_argument("--month", type=int)
+    _ = parser.add_argument("--day", type=int)
+    _ = parser.add_argument("--hour", type=int)
+    _ = parser.add_argument("--minute", type=int)
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--time-type",
         default="departure",
         choices=sorted(TIME_TYPE_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--ticket",
         default="ic",
         choices=sorted(TICKET_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--seat-preference",
         default="non_reserved",
         choices=sorted(SEAT_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--walk-speed",
         default="slightly_slow",
         choices=sorted(WALK_MAP.keys()),
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--sort-by",
         default="time",
         choices=sorted(SORT_MAP.keys()),
     )
 
-    parser.add_argument("--use-airline", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-shinkansen", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-express", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-highway-bus", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-local-bus", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use-ferry", action=argparse.BooleanOptionalAction, default=True)
+    _ = parser.add_argument(
+        "--use-airline", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-shinkansen", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-express", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-highway-bus", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-local-bus", action=argparse.BooleanOptionalAction, default=True
+    )
+    _ = parser.add_argument(
+        "--use-ferry", action=argparse.BooleanOptionalAction, default=True
+    )
 
-    parser.add_argument("--timeout", type=int, default=20)
-    parser.add_argument("--format", choices=["text", "html"], default="text")
-    parser.add_argument("--show-url", action="store_true")
+    _ = parser.add_argument("--timeout", type=int, default=20)
+    _ = parser.add_argument("--show-url", action="store_true")
 
-    args = parser.parse_args()
+    result = cast(_MainArgs, cast(object, parser.parse_args()))
 
-    if not args.url and (not args.departure or not args.arrival):
+    if not result.url and (not result.departure or not result.arrival):
         parser.error("Provide --url, or both --from and --to.")
 
-    return args
+    return result
 
 
 def main() -> int:
@@ -208,7 +350,7 @@ def main() -> int:
 
     try:
         html = fetch_html(url, args.timeout)
-        content = extract_content(html, args.format)
+        content = extract_content(html)
     except Exception as exc:  # pragma: no cover - network/runtime failures
         print(f"Error fetching route data: {exc}", file=sys.stderr)
         return 1

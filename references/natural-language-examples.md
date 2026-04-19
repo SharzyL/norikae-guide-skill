@@ -87,6 +87,21 @@ Canonical fields:
 - `useAirline=false`
 - `sortBy=transfer`
 
+## Timetable Queries
+
+| User Request | Action |
+| --- | --- |
+| 渋谷駅の時刻表を見せて | `search 渋谷` → `lines <code>` → ask which line/direction → `timetable <code> <gid>` |
+| Shibuya Yamanote line schedule | `search 渋谷` → `lines <code>` → find 山手線 gid → `timetable <code> <gid>` |
+| 東京駅の東海道新幹線、平日の時刻表 | `search 東京` → `lines <code>` → find 東海道新幹線 gid → `timetable <code> <gid> --kind 1` |
+| 新宿から中央線で何時に電車がある？ | `search 新宿` → `lines <code>` → find 中央線 gid → `timetable <code> <gid>` |
+| 渋谷有哪些线路？ | `search 渋谷` → `lines <code>` (show all lines, don't proceed to timetable) |
+
+When the user asks for a timetable:
+- If the station has only one line/direction, skip the `lines` step and go directly to `timetable`.
+- If the station has multiple lines, either match the user's stated line or ask which line/direction they want.
+- If the user asks about a specific day type (weekday/saturday/holiday), pass `--kind`.
+
 ## Clarification Rules
 
 Ask one concise clarification when:
@@ -94,3 +109,4 @@ Ask one concise clarification when:
 - station name is ambiguous
 - departure station is missing and cannot be inferred from context
 - user gives conflicting priorities (`fastest` and `cheapest`) without tie-break
+- station has multiple lines and user didn't specify which one
