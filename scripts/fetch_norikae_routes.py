@@ -14,6 +14,39 @@ from urllib.request import Request, urlopen
 
 BASE_URL = "https://transit.yahoo.co.jp/search/result"
 
+# ── ANSI colors (disabled when stdout is not a tty) ───
+
+
+def _use_color() -> bool:
+    return sys.stdout.isatty()
+
+
+def _c(code: str, text: str) -> str:
+    if not _use_color():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _bold(text: str) -> str:
+    return _c("1", text)
+
+
+def _dim(text: str) -> str:
+    return _c("2", text)
+
+
+def _green(text: str) -> str:
+    return _c("32", text)
+
+
+def _cyan(text: str) -> str:
+    return _c("36", text)
+
+
+def _yellow(text: str) -> str:
+    return _c("33", text)
+
+
 TIME_TYPE_MAP = {
     "departure": "1",
     "arrival": "4",
@@ -48,12 +81,8 @@ SORT_MAP = {
 
 
 class _BuildUrlArgs(Protocol):
-    departure: str
-    arrival: str
-    via: list[str] | None
-    year: int | None
-    month: int | None
-    day: int | None
+    stations: list[str]
+    date: str | None
     hour: int | None
     minute: int | None
     time_type: str
@@ -61,12 +90,12 @@ class _BuildUrlArgs(Protocol):
     seat_preference: str
     walk_speed: str
     sort_by: str
-    use_airline: bool
-    use_shinkansen: bool
-    use_express: bool
-    use_highway_bus: bool
-    use_local_bus: bool
-    use_ferry: bool
+    no_airline: bool
+    no_shinkansen: bool
+    no_express: bool
+    no_highway_bus: bool
+    no_local_bus: bool
+    no_ferry: bool
 
 
 class _MainArgs(_BuildUrlArgs, Protocol):
@@ -78,17 +107,23 @@ class _MainArgs(_BuildUrlArgs, Protocol):
 
 def build_url(args: _BuildUrlArgs) -> str:
     now = datetime.now()
-    year = args.year if args.year is not None else now.year
-    month = args.month if args.month is not None else now.month
-    day = args.day if args.day is not None else now.day
+
+    if args.date:
+        parts = args.date.split("/")
+        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+    else:
+        year, month, day = now.year, now.month, now.day
+
     hour = args.hour if args.hour is not None else now.hour
     minute = args.minute if args.minute is not None else now.minute
 
-    via = (args.via or [])[:3]
+    departure = args.stations[0]
+    arrival = args.stations[-1]
+    via = args.stations[1:-1][:3]
 
     params: list[tuple[str, str]] = [
-        ("from", args.departure),
-        ("to", args.arrival),
+        ("from", departure),
+        ("to", arrival),
         ("y", str(year)),
         ("m", f"{month:02d}"),
         ("d", f"{day:02d}"),
@@ -100,12 +135,12 @@ def build_url(args: _BuildUrlArgs) -> str:
         ("expkind", SEAT_MAP[args.seat_preference]),
         ("ws", WALK_MAP[args.walk_speed]),
         ("s", SORT_MAP[args.sort_by]),
-        ("al", "1" if args.use_airline else "0"),
-        ("shin", "1" if args.use_shinkansen else "0"),
-        ("ex", "1" if args.use_express else "0"),
-        ("hb", "1" if args.use_highway_bus else "0"),
-        ("lb", "1" if args.use_local_bus else "0"),
-        ("sr", "1" if args.use_ferry else "0"),
+        ("al", "0" if args.no_airline else "1"),
+        ("shin", "0" if args.no_shinkansen else "1"),
+        ("ex", "0" if args.no_express else "1"),
+        ("hb", "0" if args.no_highway_bus else "1"),
+        ("lb", "0" if args.no_local_bus else "1"),
+        ("sr", "0" if args.no_ferry else "1"),
     ]
 
     for station in via:
@@ -150,7 +185,7 @@ def _extract_summary(block: str) -> str:
         # "04:55発→05:36着41分（乗車41分）" → "04:55 → 05:36 41分 (乗車41分)"
         text = re.sub(
             r"(\d{2}:\d{2})発→(\d{2}:\d{2})着",
-            r"\1 → \2 ",
+            r"\1🡒 \2 ",
             text,
         )
         text = text.replace("（", "(").replace("）", ")")
@@ -158,8 +193,35 @@ def _extract_summary(block: str) -> str:
     # Split into two lines: time + transfers, then fare + distance
     transfer_idx = next((i for i, p in enumerate(parts) if "乗換" in p), len(parts) - 1)
     line1 = " | ".join(parts[: transfer_idx + 1])
-    line2 = " | ".join(parts[transfer_idx + 1 :])
-    if line2:
+    # Highlight time range + total duration, dim the rest but keep transfer count normal
+    line1 = re.sub(
+        r"^(\d{2}:\d{2}🡒 \d{2}:\d{2} [^\s(]+)\s*(\(.*?\))?(.*?)(乗換：)(\S+)(.*)",
+        lambda m: (
+            _bold(_yellow(m.group(1)))
+            + (" " + _dim(m.group(2)) if m.group(2) else "")
+            + _dim(m.group(3))
+            + _dim(m.group(4))
+            + _yellow(m.group(5))
+            + _dim(m.group(6))
+        ),
+        line1,
+    )
+    line2_parts = parts[transfer_idx + 1 :]
+    if line2_parts:
+        # Highlight total fare amount, dim the rest
+        fare_part = line2_parts[0] if line2_parts else ""
+        fare_part = re.sub(
+            r"(.*?)(\d[\d,]+円)\s*(\(.*?\))?",
+            lambda m: (
+                _dim(m.group(1))
+                + _yellow(m.group(2))
+                + (" " + _dim(m.group(3)) if m.group(3) else "")
+            ),
+            fare_part,
+            count=1,
+        )
+        rest = [_dim(p) for p in line2_parts[1:]]
+        line2 = (_dim(" | ")).join([fare_part] + rest)
         return f"{line1}\n{line2}"
     return line1
 
@@ -177,6 +239,11 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
     fare_section_start = ""
     # Deferred base fare text — resolved when the next station is encountered
     pending_fare: str | None = None
+    pending_fare_mode: str = ""
+    # Walk resets fare section — next station becomes the new section start
+    after_walk = False
+    # Track last departure time for interval calculation
+    last_dep_minutes: int | None = None
 
     # Find station and access elements in document order
     elements = list(
@@ -200,12 +267,13 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
                     _strip_tags(cast(str, t))
                     for t in re.findall(r"<li>(.*?)</li>", time_m.group(1))  # pyright: ignore[reportAny]
                 ]
-            time_str = " / ".join(time_parts)
 
             name = ""
             name_m = re.search(r"<dt>(?:<a[^>]*>)?(.*?)(?:</a>)?</dt>", chunk, re.S)
             if name_m:
                 name = _strip_tags(name_m.group(1))
+                # Strip bus company suffix like "/十王自動車"
+                name = re.sub(r"/[^/]+$", "", name)
 
             station_id = ""
             sid_m = re.search(r'href="/station/(\d+)"', chunk)
@@ -214,18 +282,73 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
 
             # Resolve pending base fare now that we know the end station
             if pending_fare is not None:
-                fare_sections.append(f"{fare_section_start} → {name} {pending_fare}")
+                # Strip parenthetical suffixes from station names for brevity
+                fs = re.sub(r"\(.*?\)", "", fare_section_start).strip()
+                ne = re.sub(r"\(.*?\)", "", name).strip()
+                fare_sections.append(f"{fs}🡒 ({pending_fare_mode}{pending_fare}) {ne}")
                 fare_section_start = name
                 pending_fare = None
+                pending_fare_mode = ""
 
-            if not fare_section_start:
+            if not fare_section_start or after_walk:
                 fare_section_start = name
+                after_walk = False
 
-            lines.append(f"  ◉ {time_str}  {name}{station_id}")
+            # Format: " arr ◉ dep  name [id]" with ◉ aligned
+            if len(time_parts) == 2:
+                arr = time_parts[0].rstrip("着")
+                dep = time_parts[1].rstrip("発")
+                lines.append(f" {arr} ◉ {dep}  {_bold(_green(name))}{_dim(station_id)}")
+                h, m = dep.split(":")
+                last_dep_minutes = int(h) * 60 + int(m)
+            elif time_parts:
+                t = time_parts[0].rstrip("着発")
+                lines.append(f"       ◉ {t}  {_bold(_green(name))}{_dim(station_id)}")
+                h, m = t.split(":")
+                last_dep_minutes = int(h) * 60 + int(m)
 
         elif kind.startswith("access"):
+            # Compute interval by looking ahead to next station's arrival
+            dur_str = ""
+            if last_dep_minutes is not None:
+                for j in range(i + 1, len(elements)):
+                    if elements[j].group(1) == "station":
+                        next_start = elements[j].start()
+                        next_end = (
+                            elements[j + 1].start()
+                            if j + 1 < len(elements)
+                            else len(block)
+                        )
+                        next_chunk = block[next_start:next_end]
+                        next_time_m = re.search(
+                            r'<ul class="time">(.*?)</ul>', next_chunk, re.S
+                        )
+                        if next_time_m:
+                            next_times = [
+                                _strip_tags(t)
+                                for t in cast(
+                                    list[str],
+                                    re.findall(
+                                        r"<li>(.*?)</li>",
+                                        next_time_m.group(1),
+                                    ),
+                                )
+                            ]
+                            if next_times:
+                                arr_t = next_times[0].rstrip("着発")
+                                ah, am = arr_t.split(":")
+                                arr_min = int(ah) * 60 + int(am)
+                                diff = arr_min - last_dep_minutes
+                                if diff < 0:
+                                    diff += 24 * 60
+                                dur_str = f"({diff})"
+                        break
+            # Pad duration to 6 chars so content aligns at column 16
+            dur_pad = f"{dur_str:>6}  " if dur_str else "        "
+
             if re.search(r"icnWalk", chunk):
-                lines.append("  │  徒歩")
+                lines.append(f"       │{_dim(dur_pad)}{_dim('徒歩')}")
+                after_walk = True
             else:
                 transport_m = re.search(
                     r'<li class="transport"[^>]*>(.*?)</li>', chunk, re.S
@@ -267,20 +390,35 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
                             if "情報なし" not in p and p.strip()
                         ]
                         if parts_p:
-                            platform_suffix = f" ({' → '.join(parts_p)})"
+                            platform_suffix = f" {_dim('(' + '🡒 '.join(parts_p) + ')')}"
 
-                    # Fare follows the access div as <p class="fare">
-                    fare_m = re.search(r'<p class="fare"[^>]*>(.*?)</p>', chunk, re.S)
+                    # Fare elements — may have surcharge + base fare
                     fare_suffix = ""
-                    if fare_m:
+                    for fare_m in re.finditer(
+                        r'<p class="fare"[^>]*>(.*?)</p>', chunk, re.S
+                    ):
                         fare_text = _strip_tags(fare_m.group(1))
+                        if not fare_text:
+                            continue
                         if re.search(r"指定席|グリーン|自由席", fare_text):
-                            fare_suffix = f" [{fare_text}]"
+                            fare_suffix += f" {_yellow('[' + fare_text + ']')}"
                         else:
                             pending_fare = fare_text
+                            if re.search(r"icn\w*Bus", chunk):
+                                pending_fare_mode = "バス "
+                            elif re.search(r"icn\w*Ship", chunk):
+                                pending_fare_mode = "フェリー "
+                            else:
+                                pending_fare_mode = ""
+
+                    mode_prefix = ""
+                    if re.search(r"icn\w*Bus", chunk):
+                        mode_prefix = _dim("バス ")
+                    elif re.search(r"icn\w*Ship", chunk):
+                        mode_prefix = _dim("フェリー ")
 
                     lines.append(
-                        f"  │  {transport}{dest_str}{platform_suffix}{fare_suffix}"
+                        f"       │{_dim(dur_pad)}{mode_prefix}{_cyan(transport)}{_dim(dest_str)}{platform_suffix}{fare_suffix}"
                     )
 
                     # Intermediate stations
@@ -299,7 +437,9 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
                                 ),
                             )
                             for time_val, sname in stops:
-                                lines.append(f"  │  ┊ {time_val}  {_strip_tags(sname)}")
+                                lines.append(
+                                    f"       │        {_dim('┊')} {_dim(time_val)}  {_dim(_strip_tags(sname))}"
+                                )
 
     return {"lines": lines, "fare_sections": fare_sections}
 
@@ -329,7 +469,9 @@ def extract_content(html: str, *, show_middle: bool = False) -> str:
     routes: list[str] = []
     for idx_str, block in route_blocks:
         idx = int(idx_str)
-        lines: list[str] = [f"=== ルート{idx} ==="]
+        # Convert to fullwidth digit
+        fw_idx = "".join(chr(ord("０") + int(c)) for c in str(idx))
+        lines: list[str] = [_bold(f"◉ ルート{fw_idx}"), ""]
         summary = _extract_summary(block)
         if summary:
             lines.append(summary)
@@ -339,7 +481,24 @@ def extract_content(html: str, *, show_middle: bool = False) -> str:
         if detail_m:
             detail = _parse_route_detail(detail_m.group(1), show_middle=show_middle)
             if len(detail["fare_sections"]) > 1 and summary:
-                lines[1] += f" ({' / '.join(detail['fare_sections'])})"
+                # Compact consecutive sections: "A🡒 (100円)B🡒 (200円)C"
+                fs = detail["fare_sections"]
+                result = fs[0]
+                for j in range(1, len(fs)):
+                    # Each section is "start🡒 (fare)end"
+                    prev_after = fs[j - 1].split("🡒 ", 1)[1]
+                    prev_end = re.sub(r"^\([^)]*\)\s*", "", prev_after)
+                    curr_start = fs[j].split("🡒 ", 1)[0]
+                    if prev_end == curr_start:
+                        result += "🡒 " + fs[j].split("🡒 ", 1)[1]
+                    else:
+                        result += " | " + fs[j]
+                colored = re.sub(
+                    r"(\([^)]*\))|([^()]+)",
+                    lambda m: _yellow(m.group(1)) if m.group(1) else _dim(m.group(2)),
+                    result,
+                )
+                lines[2] += f" {_dim('|')} {colored}"
             lines.extend(detail["lines"])
 
         routes.append("\n".join(lines))
@@ -349,68 +508,63 @@ def extract_content(html: str, *, show_middle: bool = False) -> str:
 
 def parse_args() -> _MainArgs:
     parser = argparse.ArgumentParser(
-        description="Fetch and extract route details from Yahoo! 乗換案内."
+        description="Fetch and extract route details from Yahoo! 乗換案内.",
     )
 
     _ = parser.add_argument("--url", help="Fully prepared Yahoo transit URL")
     _ = parser.add_argument(
-        "--from", dest="departure", help="Departure station in Japanese"
-    )
-    _ = parser.add_argument("--to", dest="arrival", help="Arrival station in Japanese")
-    _ = parser.add_argument(
-        "--via", action="append", help="Via station (repeatable, max 3)"
+        "stations",
+        nargs="*",
+        help="from [via ...] to — departure, optional via stations, then arrival",
     )
 
-    _ = parser.add_argument("--year", type=int)
-    _ = parser.add_argument("--month", type=int)
-    _ = parser.add_argument("--day", type=int)
-    _ = parser.add_argument("--hour", type=int)
-    _ = parser.add_argument("--minute", type=int)
+    _ = parser.add_argument("--date", help="Date as YYYY/MM/DD")
 
-    _ = parser.add_argument(
-        "--time-type",
-        default="departure",
-        choices=sorted(TIME_TYPE_MAP.keys()),
+    # Time specification — mutually exclusive
+    time_group = parser.add_mutually_exclusive_group()
+    _ = time_group.add_argument(
+        "--departure",
+        metavar="HH:MM",
+        help="Depart at HH:MM. If no time flag is given, departs now.",
     )
+    _ = time_group.add_argument("--arrival", metavar="HH:MM", help="Arrive by HH:MM")
+    _ = time_group.add_argument("--first", action="store_true", help="First train")
+    _ = time_group.add_argument("--last", action="store_true", help="Last train")
+    _ = time_group.add_argument(
+        "--unspecified", action="store_true", help="No time preference"
+    )
+
     _ = parser.add_argument(
         "--ticket",
         default="ic",
         choices=sorted(TICKET_MAP.keys()),
+        help="(default: ic)",
     )
     _ = parser.add_argument(
         "--seat-preference",
         default="non_reserved",
         choices=sorted(SEAT_MAP.keys()),
+        help="(default: non_reserved)",
     )
     _ = parser.add_argument(
         "--walk-speed",
         default="slightly_slow",
         choices=sorted(WALK_MAP.keys()),
+        help="(default: slightly_slow)",
     )
     _ = parser.add_argument(
         "--sort-by",
         default="time",
         choices=sorted(SORT_MAP.keys()),
+        help="(default: time)",
     )
 
-    _ = parser.add_argument(
-        "--use-airline", action=argparse.BooleanOptionalAction, default=True
-    )
-    _ = parser.add_argument(
-        "--use-shinkansen", action=argparse.BooleanOptionalAction, default=True
-    )
-    _ = parser.add_argument(
-        "--use-express", action=argparse.BooleanOptionalAction, default=True
-    )
-    _ = parser.add_argument(
-        "--use-highway-bus", action=argparse.BooleanOptionalAction, default=True
-    )
-    _ = parser.add_argument(
-        "--use-local-bus", action=argparse.BooleanOptionalAction, default=True
-    )
-    _ = parser.add_argument(
-        "--use-ferry", action=argparse.BooleanOptionalAction, default=True
-    )
+    _ = parser.add_argument("--no-airline", action="store_true")
+    _ = parser.add_argument("--no-shinkansen", action="store_true")
+    _ = parser.add_argument("--no-express", action="store_true")
+    _ = parser.add_argument("--no-highway-bus", action="store_true")
+    _ = parser.add_argument("--no-local-bus", action="store_true")
+    _ = parser.add_argument("--no-ferry", action="store_true")
 
     _ = parser.add_argument("--timeout", type=int, default=20)
     _ = parser.add_argument(
@@ -422,10 +576,36 @@ def parse_args() -> _MainArgs:
         "--page", type=int, default=1, help="Result page number (3 routes per page)"
     )
 
-    result = cast(_MainArgs, cast(object, parser.parse_args()))
+    ns = parser.parse_args()
 
-    if not result.url and (not result.departure or not result.arrival):
-        parser.error("Provide --url, or both --from and --to.")
+    # Resolve time_type and hour/minute from exclusive group
+    arr_time = cast(str | None, ns.arrival)
+    dep_time = cast(str | None, ns.departure)
+    if arr_time:
+        ns.time_type = "arrival"
+        h_s, m_s = arr_time.split(":")
+        ns.hour, ns.minute = int(h_s), int(m_s)
+    elif cast(bool, ns.first):
+        ns.time_type = "first_train"
+        ns.hour, ns.minute = None, None
+    elif cast(bool, ns.last):
+        ns.time_type = "last_train"
+        ns.hour, ns.minute = None, None
+    elif cast(bool, ns.unspecified):
+        ns.time_type = "unspecified"
+        ns.hour, ns.minute = None, None
+    elif dep_time:
+        ns.time_type = "departure"
+        h_s, m_s = dep_time.split(":")
+        ns.hour, ns.minute = int(h_s), int(m_s)
+    else:
+        ns.time_type = "departure"
+        ns.hour, ns.minute = None, None
+
+    result = cast(_MainArgs, cast(object, ns))
+
+    if not result.url and len(result.stations) < 2:
+        parser.error("Provide --url, or at least two stations (from, to).")
 
     return result
 
@@ -445,7 +625,7 @@ def main() -> int:
         print(f"Error fetching route data: {exc}", file=sys.stderr)
         return 1
 
-    print(f"URL: {url}")
+    print(f"URL: {_dim(url)}")
     print()
     print(content)
     return 0
