@@ -141,6 +141,8 @@ class _StopStation(TypedDict):
 class _TrainTimetable(TypedDict):
     trainId: str
     displayName: str
+    driveComment: str
+    guideComment: str
     stopStation: list[_StopStation]
 
 
@@ -357,6 +359,12 @@ def cmd_train(args: _TrainArgs) -> int:
         arr = _fmt_time(stop["arrivalTime"])
         dep = _fmt_time(stop["departureTime"])
         print(f"  {arr} → {dep}  {stop['stationName']}")
+
+    comments = [c for c in (tt["driveComment"], tt["guideComment"]) if c]
+    if comments:
+        print()
+        for c in comments:
+            print(f"※ {c}")
 
     return 0
 

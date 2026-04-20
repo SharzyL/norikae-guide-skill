@@ -8,7 +8,7 @@ from datetime import datetime
 import html as html_lib
 import re
 import sys
-from typing import Protocol, cast
+from typing import Protocol, TypedDict, cast
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -72,6 +72,8 @@ class _BuildUrlArgs(Protocol):
 class _MainArgs(_BuildUrlArgs, Protocol):
     url: str | None
     timeout: int
+    show_middle: bool
+    page: int
 
 
 def build_url(args: _BuildUrlArgs) -> str:
@@ -153,11 +155,28 @@ def _extract_summary(block: str) -> str:
         )
         text = text.replace("（", "(").replace("）", ")")
         parts.append(text)
-    return " | ".join(parts)
+    # Split into two lines: time + transfers, then fare + distance
+    transfer_idx = next((i for i, p in enumerate(parts) if "乗換" in p), len(parts) - 1)
+    line1 = " | ".join(parts[: transfer_idx + 1])
+    line2 = " | ".join(parts[transfer_idx + 1 :])
+    if line2:
+        return f"{line1}\n{line2}"
+    return line1
 
 
-def _parse_route_detail(block: str) -> list[str]:
+class _RouteDetail(TypedDict):
+    lines: list[str]
+    fare_sections: list[str]
+
+
+def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetail:
     lines: list[str] = []
+    fare_sections: list[str] = []
+
+    # Track station names for fare section labels
+    fare_section_start = ""
+    # Deferred base fare text — resolved when the next station is encountered
+    pending_fare: str | None = None
 
     # Find station and access elements in document order
     elements = list(
@@ -188,7 +207,21 @@ def _parse_route_detail(block: str) -> list[str]:
             if name_m:
                 name = _strip_tags(name_m.group(1))
 
-            lines.append(f"  ◉ {time_str}  {name}")
+            station_id = ""
+            sid_m = re.search(r'href="/station/(\d+)"', chunk)
+            if sid_m:
+                station_id = f" [id={sid_m.group(1)}]"
+
+            # Resolve pending base fare now that we know the end station
+            if pending_fare is not None:
+                fare_sections.append(f"{fare_section_start} → {name} {pending_fare}")
+                fare_section_start = name
+                pending_fare = None
+
+            if not fare_section_start:
+                fare_section_start = name
+
+            lines.append(f"  ◉ {time_str}  {name}{station_id}")
 
         elif kind.startswith("access"):
             if re.search(r"icnWalk", chunk):
@@ -244,16 +277,34 @@ def _parse_route_detail(block: str) -> list[str]:
                         if re.search(r"指定席|グリーン|自由席", fare_text):
                             fare_suffix = f" [{fare_text}]"
                         else:
-                            fare_suffix = f" [ここまでの基本運賃: {fare_text}]"
+                            pending_fare = fare_text
 
                     lines.append(
                         f"  │  {transport}{dest_str}{platform_suffix}{fare_suffix}"
                     )
 
-    return lines
+                    # Intermediate stations
+                    if show_middle:
+                        stop_m = re.search(
+                            r'<li class="stop">(.*?)</ul></li>',
+                            chunk,
+                            re.S,
+                        )
+                        if stop_m:
+                            stops = cast(
+                                list[tuple[str, str]],
+                                re.findall(
+                                    r"<dt>(.*?)</dt><dd>.*?</span>(.*?)</dd>",
+                                    stop_m.group(1),
+                                ),
+                            )
+                            for time_val, sname in stops:
+                                lines.append(f"  │  ┊ {time_val}  {_strip_tags(sname)}")
+
+    return {"lines": lines, "fare_sections": fare_sections}
 
 
-def extract_content(html: str) -> str:
+def extract_content(html: str, *, show_middle: bool = False) -> str:
     cleaned = re.sub(r"<!--.*?-->", "", html, flags=re.S)
 
     route_blocks = cast(
@@ -286,7 +337,10 @@ def extract_content(html: str) -> str:
 
         detail_m = re.search(r'<div class="routeDetail">(.*)', block, re.S)
         if detail_m:
-            lines.extend(_parse_route_detail(detail_m.group(1)))
+            detail = _parse_route_detail(detail_m.group(1), show_middle=show_middle)
+            if len(detail["fare_sections"]) > 1 and summary:
+                lines[1] += f" ({' / '.join(detail['fare_sections'])})"
+            lines.extend(detail["lines"])
 
         routes.append("\n".join(lines))
 
@@ -359,6 +413,14 @@ def parse_args() -> _MainArgs:
     )
 
     _ = parser.add_argument("--timeout", type=int, default=20)
+    _ = parser.add_argument(
+        "--show-middle",
+        action="store_true",
+        help="Show intermediate stations between transfer points",
+    )
+    _ = parser.add_argument(
+        "--page", type=int, default=1, help="Result page number (3 routes per page)"
+    )
 
     result = cast(_MainArgs, cast(object, parser.parse_args()))
 
@@ -371,10 +433,14 @@ def parse_args() -> _MainArgs:
 def main() -> int:
     args = parse_args()
     url = args.url or build_url(args)
+    if args.page > 1:
+        fl = 3 * (args.page - 1) + 1
+        tl = 3 * args.page
+        url += f"&fl={fl}&tl={tl}"
 
     try:
         html = fetch_html(url, args.timeout)
-        content = extract_content(html)
+        content = extract_content(html, show_middle=args.show_middle)
     except Exception as exc:  # pragma: no cover - network/runtime failures
         print(f"Error fetching route data: {exc}", file=sys.stderr)
         return 1

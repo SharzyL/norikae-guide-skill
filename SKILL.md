@@ -23,6 +23,8 @@ Options:
 - `--seat-preference`: `non_reserved` (default), `reserved`, `green`
 - `--walk-speed`: `slightly_slow` (default), `fast`, `slightly_fast`, `slow`
 - `--no-use-shinkansen`, `--no-use-express`, `--no-use-airline`, `--no-use-highway-bus`, `--no-use-local-bus`, `--no-use-ferry` — by default all transportation types are enabled; pass these flags when the user asks for a specific type
+- `--show-middle` — show intermediate stations between transfer points
+- `--page <N>` — result page number (3 routes per page, default 1). Use when the user wants more results.
 
 You can also fetch from an existing URL:
 ```bash
@@ -47,6 +49,8 @@ python3 scripts/fetch_norikae_routes.py --url '<full-yahoo-url>'
 | last train / 終電 | `--time-type last_train` |
 
 ## Timetable Lookup
+
+Route search output includes station IDs (e.g. `[id=22828]`). If the user asks for a timetable of a station from route results, you can skip step 1 and use the ID directly.
 
 Follow these steps in order:
 
