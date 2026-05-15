@@ -170,6 +170,18 @@ def _strip_tags(fragment: str) -> str:
     return html_lib.unescape(text).strip()
 
 
+def _clean_time(s: str) -> str:
+    # Drop 着/発 markers; preserve parens which mark pass-through stops
+    return s.replace("着", "").replace("発", "")
+
+
+def _to_minutes(s: str) -> int | None:
+    m = re.search(r"(\d{1,2}):(\d{2})", s)
+    if not m:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
 def _extract_summary(block: str) -> str:
     m = re.search(r'<ul class="summary">(.*?)</ul>', block, re.S)
     if not m:
@@ -296,16 +308,18 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
 
             # Format: " arr ◉ dep  name [id]" with ◉ aligned
             if len(time_parts) == 2:
-                arr = time_parts[0].rstrip("着")
-                dep = time_parts[1].rstrip("発")
+                arr = _clean_time(time_parts[0])
+                dep = _clean_time(time_parts[1])
                 lines.append(f" {arr} ◉ {dep}  {_bold(_green(name))}{_dim(station_id)}")
-                h, m = dep.split(":")
-                last_dep_minutes = int(h) * 60 + int(m)
+                mins = _to_minutes(dep)
+                if mins is not None:
+                    last_dep_minutes = mins
             elif time_parts:
-                t = time_parts[0].rstrip("着発")
+                t = _clean_time(time_parts[0])
                 lines.append(f"       ◉ {t}  {_bold(_green(name))}{_dim(station_id)}")
-                h, m = t.split(":")
-                last_dep_minutes = int(h) * 60 + int(m)
+                mins = _to_minutes(t)
+                if mins is not None:
+                    last_dep_minutes = mins
 
         elif kind.startswith("access"):
             # Compute interval by looking ahead to next station's arrival
@@ -335,13 +349,12 @@ def _parse_route_detail(block: str, *, show_middle: bool = False) -> _RouteDetai
                                 )
                             ]
                             if next_times:
-                                arr_t = next_times[0].rstrip("着発")
-                                ah, am = arr_t.split(":")
-                                arr_min = int(ah) * 60 + int(am)
-                                diff = arr_min - last_dep_minutes
-                                if diff < 0:
-                                    diff += 24 * 60
-                                dur_str = f"({diff})"
+                                arr_min = _to_minutes(next_times[0])
+                                if arr_min is not None:
+                                    diff = arr_min - last_dep_minutes
+                                    if diff < 0:
+                                        diff += 24 * 60
+                                    dur_str = f"({diff})"
                         break
             # Pad duration to 6 chars so content aligns at column 16
             dur_pad = f"{dur_str:>6}  " if dur_str else "        "
