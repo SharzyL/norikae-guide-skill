@@ -4,6 +4,17 @@ A reusable AI skill for Japan transit route planning and timetable lookup via Ya
 
 See [SKILL.md](SKILL.md) for full usage reference.
 
+## Interactive TUI
+
+`fetch_timetable.py` ships with an optional [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/)-based TUI for interactive station search and timetable browsing:
+
+```bash
+pip install prompt_toolkit
+python3 scripts/fetch_timetable.py tui [optional-initial-query]
+```
+
+prompt_toolkit is loaded lazily — it is **not** required for normal CLI / skill use.
+
 ## Install
 
 ```bash
